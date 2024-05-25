@@ -1,29 +1,71 @@
 use std::{
+    env::current_dir,
     io::{self, stdout},
+    path::PathBuf,
     rc::Rc,
 };
 
 use crossterm::{
-    event::{self, Event, KeyCode},
+    event::{self, Event, KeyCode, KeyEventKind},
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     ExecutableCommand,
 };
 use ratatui::{prelude::*, widgets::*};
 
 fn main() -> io::Result<()> {
-    enable_raw_mode()?;
-    stdout().execute(EnterAlternateScreen)?;
-    let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
+    match current_dir() {
+        Ok(dir) => {
+            enable_raw_mode()?;
+            stdout().execute(EnterAlternateScreen)?;
+            let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
 
-    let mut should_quit = false;
-    while !should_quit {
-        terminal.draw(ui)?;
-        should_quit = handle_events()?;
+            let mut app = App::new(dir);
+
+            run_app(&mut terminal, app);
+
+            disable_raw_mode()?;
+            stdout().execute(LeaveAlternateScreen)?;
+            Ok(())
+        }
+        Err(e) => Err(e),
     }
+}
 
-    disable_raw_mode()?;
-    stdout().execute(LeaveAlternateScreen)?;
-    Ok(())
+fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<()> {
+    loop {
+        terminal.draw(|f| ui(f, &mut app))?;
+
+        if let Event::Key(key) = event::read()? {
+            if key.kind == KeyEventKind::Press {
+                match key.code {
+                    KeyCode::Char('Q') => return Ok(()),
+                    _ => {}
+                }
+            }
+        }
+    }
+}
+
+struct App {
+    dir_info: DirInfo,
+}
+
+impl App {
+    fn new(current_dir: PathBuf) -> Self {
+        Self {
+            dir_info: DirInfo::new(current_dir),
+        }
+    }
+}
+
+struct DirInfo {
+    current_dir: PathBuf,
+}
+
+impl DirInfo {
+    fn new(current_dir: PathBuf) -> Self {
+        Self { current_dir }
+    }
 }
 
 fn handle_events() -> io::Result<bool> {
@@ -37,7 +79,7 @@ fn handle_events() -> io::Result<bool> {
     Ok(false)
 }
 
-fn ui(frame: &mut Frame) {
+fn ui(frame: &mut Frame, app: &mut App) {
     let main_layout = Layout::new(
         Direction::Vertical,
         [
@@ -93,31 +135,36 @@ fn ui_shares(frame: &mut Frame, share_layout: Rect) {
 }
 
 fn ui_title(frame: &mut Frame, title_layout: Rect) {
-    frame.render_widget(
-        Block::new()
-            .borders(Borders::TOP)
-            .title("kj, a command line file share manager"),
-        title_layout,
+    let title = Span::styled(
+        "kj, a command line file share manager",
+        Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD),
     );
+    let title = Line::from(vec![title]);
+    let text: Text = Text::from(vec![title]);
+
+    frame.render_widget(Paragraph::new(text), title_layout);
 }
 
 fn ui_status_line(frame: &mut Frame, status_layout: Rect) {
-    let span1 = Span::raw("Hello ");
-    let span2 = Span::styled(
-        "World",
-        Style::new()
-            .fg(Color::Green)
-            .bg(Color::White)
-            .add_modifier(Modifier::BOLD),
-    );
-    let span3 = "!".red().on_light_yellow().italic();
+    let style_key = Style::new()
+        .fg(Color::Green)
+        .bg(Color::Black)
+        .add_modifier(Modifier::BOLD);
 
-    let line = Line::from(vec![span1, span2, span3]);
+    let line = Line::from(vec![
+        Span::raw("Press "),
+        Span::styled("'Q'", style_key),
+        Span::raw(" to exit, "),
+        Span::styled("'ctrl + h'/'ctrl + j'", style_key),
+        Span::raw(" switch panel, "),
+        Span::styled("'h'/'j'/'k'/'l'", style_key),
+        Span::raw(" to select file, "),
+        Span::styled("'='/'-'", style_key),
+        Span::raw(" add/remove share, "),
+        Span::styled("'C'", style_key),
+        Span::raw(" clear all share."),
+    ]);
     let text: Text = Text::from(vec![line]);
-    frame.render_widget(
-        Block::new().borders(Borders::TOP).title(
-            "Press 'Q' to exit, 'ctrl + h','ctrl + j' switch panel, 'h', 'j', 'k', 'l' to move cursor, '=', '-' add/remove share, 'C' clear all share",
-        ),
-        status_layout,
-    );
+
+    frame.render_widget(Paragraph::new(text), status_layout);
 }
