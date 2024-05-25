@@ -1,8 +1,7 @@
 use std::{
     env::current_dir,
     io::{self, stdout},
-    path::PathBuf,
-    rc::Rc,
+    path::{Path, PathBuf},
 };
 
 use crossterm::{
@@ -19,7 +18,7 @@ fn main() -> io::Result<()> {
             stdout().execute(EnterAlternateScreen)?;
             let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
 
-            let mut app = App::new(dir);
+            let app = App::new(dir);
 
             run_app(&mut terminal, app);
 
@@ -46,20 +45,42 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
     }
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+enum CurrentBlock {
+    #[default]
+    Dir,
+    Shares,
+}
+
 struct App {
+    current_block: CurrentBlock,
     dir_info: DirInfo,
 }
 
 impl App {
     fn new(current_dir: PathBuf) -> Self {
         Self {
+            current_block: CurrentBlock::Dir,
             dir_info: DirInfo::new(current_dir),
         }
+    }
+
+    fn get_current_block(&self) -> CurrentBlock {
+        self.current_block
+    }
+
+    fn get_parent_dir(&self) -> Option<&Path> {
+        self.dir_info.current_dir.parent()
+    }
+
+    fn get_current_dir(&self) -> &Path {
+        &self.dir_info.current_dir
     }
 }
 
 struct DirInfo {
     current_dir: PathBuf,
+    // current_file: PathBuf,
 }
 
 impl DirInfo {
@@ -92,30 +113,35 @@ fn ui(frame: &mut Frame, app: &mut App) {
 
     ui_title(frame, main_layout[0]);
 
-    ui_content(frame, main_layout[1]);
+    ui_content(frame, main_layout[1], app);
 
     ui_status_line(frame, main_layout[2]);
 }
 
-fn ui_content(frame: &mut Frame, content_layout: Rect) {
+fn ui_content(frame: &mut Frame, content_layout: Rect, app: &mut App) {
     let inner_layout = Layout::new(
         Direction::Horizontal,
         [Constraint::Percentage(70), Constraint::Percentage(30)],
     )
     .split(content_layout);
 
-    ui_dir(frame, inner_layout[0]);
+    ui_dir(frame, inner_layout[0], app);
 
-    ui_shares(frame, inner_layout[1]);
+    ui_shares(frame, inner_layout[1], app);
 }
 
-fn ui_dir(frame: &mut Frame, dir_layout: Rect) {
-    let dir_block = Block::bordered().title("Dir");
-    let dir_child = dir_block.inner(dir_layout);
+fn ui_dir(frame: &mut Frame, dir_block_layout: Rect, app: &mut App) {
+    let mut dir_block = Block::bordered().title("Dir");
 
-    frame.render_widget(dir_block, dir_layout);
+    if app.get_current_block() == CurrentBlock::Dir {
+        dir_block = dir_block.style(Style::new().fg(Color::Yellow));
+    }
 
-    let dir_child_layout = Layout::new(
+    let dir_child = dir_block.inner(dir_block_layout);
+
+    frame.render_widget(dir_block, dir_block_layout);
+
+    let dir_layout = Layout::new(
         Direction::Horizontal,
         [
             Constraint::Percentage(30),
@@ -125,13 +151,32 @@ fn ui_dir(frame: &mut Frame, dir_layout: Rect) {
     )
     .split(dir_child);
 
-    frame.render_widget(Block::bordered().title("Parent Dir"), dir_child_layout[0]);
-    frame.render_widget(Block::bordered().title("Current Dir"), dir_child_layout[1]);
-    frame.render_widget(Block::bordered().title("Child Dir"), dir_child_layout[2]);
+    ui_parent_dir(frame, dir_layout[0], app);
+    ui_current_dir(frame, dir_layout[1], app);
+    ui_child_dir(frame, dir_layout[2], app);
 }
 
-fn ui_shares(frame: &mut Frame, share_layout: Rect) {
-    frame.render_widget(Block::bordered().title("Shares"), share_layout);
+fn ui_parent_dir(frame: &mut Frame, parent_dir_layout: Rect, app: &mut App) {
+    frame.render_widget(
+        Block::bordered().title("Parent Dir").style(Style::new()),
+        parent_dir_layout,
+    );
+}
+
+fn ui_current_dir(frame: &mut Frame, current_dir_layout: Rect, app: &mut App) {
+    frame.render_widget(Block::bordered().title("Current Dir"), current_dir_layout);
+}
+
+fn ui_child_dir(frame: &mut Frame, child_dir_layout: Rect, app: &mut App) {
+    frame.render_widget(Block::bordered().title("Child Dir"), child_dir_layout);
+}
+
+fn ui_shares(frame: &mut Frame, share_layout: Rect, app: &mut App) {
+    let mut block = Block::bordered().title("Shares");
+    if app.get_current_block() == CurrentBlock::Shares {
+        block = block.style(Style::new().fg(Color::Yellow));
+    }
+    frame.render_widget(block, share_layout);
 }
 
 fn ui_title(frame: &mut Frame, title_layout: Rect) {
@@ -162,7 +207,7 @@ fn ui_status_line(frame: &mut Frame, status_layout: Rect) {
         Span::styled("'='/'-'", style_key),
         Span::raw(" add/remove share, "),
         Span::styled("'C'", style_key),
-        Span::raw(" clear all share."),
+        Span::raw(" clear all shares."),
     ]);
     let text: Text = Text::from(vec![line]);
 
