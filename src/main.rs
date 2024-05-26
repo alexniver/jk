@@ -13,6 +13,8 @@ use crossterm::{
 };
 use ratatui::{prelude::*, widgets::*};
 
+const PORT: u16 = 33231;
+
 fn main() -> io::Result<()> {
     match current_dir() {
         Ok(dir) => {
@@ -20,7 +22,7 @@ fn main() -> io::Result<()> {
             stdout().execute(EnterAlternateScreen)?;
             let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
 
-            let app = App::new(dir);
+            let app = App::new(dir)?;
 
             run_app(&mut terminal, app)?;
 
@@ -34,7 +36,7 @@ fn main() -> io::Result<()> {
 
 fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<()> {
     loop {
-        sleep(Duration::from_millis(100));
+        sleep(Duration::from_millis(50));
         terminal.draw(|f| ui(f, &mut app))?;
 
         let mut is_left_ctrl = false;
@@ -89,12 +91,13 @@ struct App {
 }
 
 impl App {
-    fn new(current_dir: PathBuf) -> Self {
-        Self {
+    fn new(current_dir: PathBuf) -> io::Result<Self> {
+        let s = Self {
             current_block: CurrentBlock::Dir,
-            dir_info: DirInfo::new(current_dir),
+            dir_info: DirInfo::new(current_dir)?,
             share_info: ShareInfo::new(),
-        }
+        };
+        Ok(s)
     }
 
     fn get_current_block(&self) -> CurrentBlock {
@@ -104,24 +107,37 @@ impl App {
     fn set_current_block(&mut self, target_block: CurrentBlock) {
         self.current_block = target_block
     }
-
-    fn get_parent_dir(&self) -> Option<&Path> {
-        self.dir_info.current_dir.parent()
-    }
-
-    fn get_current_dir(&self) -> &Path {
-        &self.dir_info.current_dir
-    }
 }
 
 struct DirInfo {
     current_dir: PathBuf,
-    // current_file: PathBuf,
+    parent_dir_files: Vec<PathBuf>,
+    current_dir_files: Vec<PathBuf>,
+    child_dir_files: Vec<PathBuf>,
+    selected_file_idx: usize,
 }
 
 impl DirInfo {
-    fn new(current_dir: PathBuf) -> Self {
-        Self { current_dir }
+    fn new(current_dir: PathBuf) -> io::Result<Self> {
+        let mut parent_dir_files = vec![];
+        let mut current_dir_files = vec![];
+        let mut child_dir_files = vec![];
+        let selected_file_idx = 0;
+        if let Some(parent_dir) = current_dir.parent() {
+            get_files(parent_dir, &mut parent_dir_files)?
+        }
+        get_files(&current_dir, &mut current_dir_files)?;
+        if current_dir_files.len() > 0 && current_dir_files[selected_file_idx].is_dir() {
+            get_files(&current_dir_files[selected_file_idx], &mut child_dir_files)?;
+        }
+        let s = Self {
+            current_dir,
+            parent_dir_files,
+            current_dir_files,
+            child_dir_files,
+            selected_file_idx,
+        };
+        Ok(s)
     }
 }
 
@@ -131,6 +147,16 @@ impl ShareInfo {
     fn new() -> Self {
         Self {}
     }
+}
+
+fn get_files(dir: &Path, files: &mut Vec<PathBuf>) -> io::Result<()> {
+    files.clear();
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        files.push(path);
+    }
+    Ok(())
 }
 
 fn ui(frame: &mut Frame, app: &mut App) {
@@ -167,7 +193,7 @@ fn ui_dir(frame: &mut Frame, dir_block_layout: Rect, app: &mut App) {
     let mut dir_block = Block::bordered().title("Dir");
 
     if app.get_current_block() == CurrentBlock::Dir {
-        dir_block = dir_block.style(Style::new().fg(Color::Yellow));
+        dir_block = dir_block.style(Style::new().fg(Color::Yellow).bold());
     }
 
     let dir_child = dir_block.inner(dir_block_layout);
@@ -190,32 +216,83 @@ fn ui_dir(frame: &mut Frame, dir_block_layout: Rect, app: &mut App) {
 }
 
 fn ui_parent_dir(frame: &mut Frame, parent_dir_layout: Rect, app: &mut App) {
-    frame.render_widget(
-        Block::bordered().title("Parent Dir").style(Style::new()),
-        parent_dir_layout,
-    );
+    let items: Vec<ListItem> = app
+        .dir_info
+        .parent_dir_files
+        .iter()
+        .map(|p| {
+            let mut lines = vec![p.to_str().unwrap().into()];
+
+            ListItem::new(lines).style(Style::default().fg(Color::Black).bg(Color::White))
+        })
+        .collect();
+    let dir_list = List::new(items)
+        .block(
+            Block::bordered()
+                .title("Parent Dir")
+                .style(Style::default().gray()),
+        )
+        .direction(ListDirection::TopToBottom);
+    frame.render_widget(dir_list, parent_dir_layout);
 }
 
 fn ui_current_dir(frame: &mut Frame, current_dir_layout: Rect, app: &mut App) {
-    frame.render_widget(Block::bordered().title("Current Dir"), current_dir_layout);
+    let items: Vec<ListItem> = app
+        .dir_info
+        .current_dir_files
+        .iter()
+        .map(|p| {
+            let mut lines = vec![p.to_str().unwrap().into()];
+
+            ListItem::new(lines).style(Style::default().fg(Color::Black).bg(Color::White))
+        })
+        .collect();
+    let dir_list = List::new(items)
+        .block(
+            Block::bordered()
+                .title("Current Dir")
+                .style(Style::default().gray()),
+        )
+        .direction(ListDirection::TopToBottom);
+    frame.render_widget(dir_list, current_dir_layout);
 }
 
 fn ui_child_dir(frame: &mut Frame, child_dir_layout: Rect, app: &mut App) {
-    frame.render_widget(Block::bordered().title("Child Dir"), child_dir_layout);
+    let items: Vec<ListItem> = app
+        .dir_info
+        .child_dir_files
+        .iter()
+        .map(|p| {
+            let mut lines = vec![p.to_str().unwrap().into()];
+
+            ListItem::new(lines).style(Style::default().fg(Color::Black).bg(Color::White))
+        })
+        .collect();
+    let dir_list = List::new(items)
+        .block(
+            Block::bordered()
+                .title("Child Dir")
+                .style(Style::default().gray()),
+        )
+        .direction(ListDirection::TopToBottom);
+
+    frame.render_widget(dir_list, child_dir_layout);
 }
 
 fn ui_shares(frame: &mut Frame, share_layout: Rect, app: &mut App) {
     let mut block = Block::bordered().title("Shares");
     if app.get_current_block() == CurrentBlock::Shares {
-        block = block.style(Style::new().fg(Color::Yellow));
+        block = block.style(Style::new().fg(Color::Yellow).bold());
     }
     frame.render_widget(block, share_layout);
 }
 
 fn ui_title(frame: &mut Frame, title_layout: Rect) {
     let title = Span::styled(
-        "kj, a command line file share manager",
-        Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        format!("Visit localhost:{PORT}"),
+        Style::new()
+            .fg(Color::LightBlue)
+            .add_modifier(Modifier::BOLD),
     );
     let title = Line::from(vec![title]);
     let text: Text = Text::from(vec![title]);
@@ -233,7 +310,7 @@ fn ui_status_line(frame: &mut Frame, status_layout: Rect) {
         Span::raw("Press "),
         Span::styled("'Q'", style_key),
         Span::raw(" to exit, "),
-        Span::styled("'ctrl + h'/'ctrl + j'", style_key),
+        Span::styled("'ctrl + h'/'ctrl + l'", style_key),
         Span::raw(" switch panel, "),
         Span::styled("'h'/'j'/'k'/'l'", style_key),
         Span::raw(" to select file, "),
