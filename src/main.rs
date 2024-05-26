@@ -2,10 +2,12 @@ use std::{
     env::current_dir,
     io::{self, stdout},
     path::{Path, PathBuf},
+    thread::sleep,
+    time::Duration,
 };
 
 use crossterm::{
-    event::{self, Event, KeyCode, KeyEventKind},
+    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers, ModifierKeyCode},
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     ExecutableCommand,
 };
@@ -20,7 +22,7 @@ fn main() -> io::Result<()> {
 
             let app = App::new(dir);
 
-            run_app(&mut terminal, app);
+            run_app(&mut terminal, app)?;
 
             disable_raw_mode()?;
             stdout().execute(LeaveAlternateScreen)?;
@@ -32,12 +34,40 @@ fn main() -> io::Result<()> {
 
 fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<()> {
     loop {
+        sleep(Duration::from_millis(100));
         terminal.draw(|f| ui(f, &mut app))?;
 
+        let mut is_left_ctrl = false;
+
         if let Event::Key(key) = event::read()? {
+            if key.modifiers.contains(KeyModifiers::CONTROL) {
+                is_left_ctrl = true;
+            }
+
             if key.kind == KeyEventKind::Press {
+                // match key_code
                 match key.code {
                     KeyCode::Char('Q') => return Ok(()),
+                    KeyCode::Char('h') => {
+                        // 按下ctrl, 切换dir, 否则在当前block切换
+                        if is_left_ctrl {
+                            match app.get_current_block() {
+                                CurrentBlock::Dir => app.set_current_block(CurrentBlock::Shares),
+                                CurrentBlock::Shares => app.set_current_block(CurrentBlock::Dir),
+                            }
+                        } else {
+                        }
+                    }
+                    KeyCode::Char('l') => {
+                        // 按下ctrl, 切换dir, 否则在当前block切换
+                        if is_left_ctrl {
+                            match app.get_current_block() {
+                                CurrentBlock::Dir => app.set_current_block(CurrentBlock::Shares),
+                                CurrentBlock::Shares => app.set_current_block(CurrentBlock::Dir),
+                            }
+                        } else {
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -55,6 +85,7 @@ enum CurrentBlock {
 struct App {
     current_block: CurrentBlock,
     dir_info: DirInfo,
+    share_info: ShareInfo,
 }
 
 impl App {
@@ -62,11 +93,16 @@ impl App {
         Self {
             current_block: CurrentBlock::Dir,
             dir_info: DirInfo::new(current_dir),
+            share_info: ShareInfo::new(),
         }
     }
 
     fn get_current_block(&self) -> CurrentBlock {
         self.current_block
+    }
+
+    fn set_current_block(&mut self, target_block: CurrentBlock) {
+        self.current_block = target_block
     }
 
     fn get_parent_dir(&self) -> Option<&Path> {
@@ -89,15 +125,12 @@ impl DirInfo {
     }
 }
 
-fn handle_events() -> io::Result<bool> {
-    if event::poll(std::time::Duration::from_millis(50))? {
-        if let Event::Key(key) = event::read()? {
-            if key.kind == event::KeyEventKind::Press && key.code == KeyCode::Char('Q') {
-                return Ok(true);
-            }
-        }
+struct ShareInfo {}
+
+impl ShareInfo {
+    fn new() -> Self {
+        Self {}
     }
-    Ok(false)
 }
 
 fn ui(frame: &mut Frame, app: &mut App) {
