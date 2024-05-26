@@ -1,4 +1,5 @@
 use std::{
+    cmp::Ordering,
     env::current_dir,
     io::{self, stdout},
     path::{Path, PathBuf},
@@ -156,6 +157,19 @@ fn get_files(dir: &Path, files: &mut Vec<PathBuf>) -> io::Result<()> {
         let path = entry.path();
         files.push(path);
     }
+    files.sort_by(|a, b| {
+        if a.is_dir() && b.is_file() {
+            Ordering::Less
+        } else if a.is_file() && b.is_dir() {
+            Ordering::Greater
+        } else {
+            if let (Some(a_name), Some(b_name)) = (a.file_name(), b.file_name()) {
+                a_name.cmp(b_name)
+            } else {
+                Ordering::Equal
+            }
+        }
+    });
     Ok(())
 }
 
