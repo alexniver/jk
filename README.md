@@ -1,3 +1,3 @@
-##  kj
+##  kk
 
-kj is a command line file share manager
+kk is a command line file share manager

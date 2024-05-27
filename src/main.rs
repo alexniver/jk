@@ -18,7 +18,7 @@ const PORT: u16 = 33231;
 
 const COLOR_FG: Color = Color::Green;
 const COLOR_BG: Color = Color::Black;
-const COLOR_HIGHLIGHT: Color = Color::LightRed;
+const COLOR_HIGHLIGHT: Color = Color::DarkGray;
 
 fn main() -> io::Result<()> {
     match current_dir() {
