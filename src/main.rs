@@ -76,6 +76,16 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
                         } else {
                         }
                     }
+                    KeyCode::Char('j') => {
+                        if let Some(ref mut current) = app.dir_info.current {
+                            current.set_list_state_next()
+                        }
+                    }
+                    KeyCode::Char('k') => {
+                        if let Some(ref mut current) = app.dir_info.current {
+                            current.set_list_state_prev()
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -124,13 +134,21 @@ struct DirInfo {
 
 impl DirInfo {
     fn new(current_dir: PathBuf) -> io::Result<Self> {
-        let selected_map = HashMap::new();
+        let mut selected_map = HashMap::new();
 
         let parent = if let Some(parent) = current_dir.parent() {
-            Some(PathInfo::new(PathBuf::from(parent), PathType::Parent)?)
+            let mut path_info = PathInfo::new(PathBuf::from(parent), PathType::Parent)?;
+            for (idx, p) in path_info.files.iter().enumerate() {
+                if p == &current_dir {
+                    selected_map.insert(PathBuf::from(parent), idx);
+                }
+            }
+            path_info.set_list_state(&selected_map);
+            Some(path_info)
         } else {
             None
         };
+
         let current = PathInfo::new(current_dir, PathType::Current)?;
         let current_files = &current.files;
         let child = if let Some(first_file) = current_files.first() {
@@ -171,8 +189,9 @@ impl PathInfo {
     fn new(path: PathBuf, path_type: PathType) -> io::Result<Self> {
         let mut list_state = ListState::default();
         list_state.select(Some(0));
+
         let mut files = vec![];
-        get_files(&path, &mut files);
+        get_files(&path, &mut files)?;
 
         Ok(Self {
             path,
@@ -180,6 +199,33 @@ impl PathInfo {
             list_state,
             files,
         })
+    }
+
+    fn set_list_state(&mut self, selected_map: &HashMap<PathBuf, usize>) {
+        if let Some(&idx) = selected_map.get(&self.path) {
+            self.list_state.select(Some(idx));
+        }
+    }
+
+    fn set_list_state_prev(&mut self) {
+        if let Some(idx) = self.list_state.selected() {
+            if idx > 0 {
+                self.list_state.select(Some(idx - 1))
+            } else {
+                self.list_state.select(Some(self.files.len() - 1))
+            }
+        }
+    }
+
+    fn set_list_state_next(&mut self) {
+        let len = self.files.len();
+        if let Some(idx) = self.list_state.selected() {
+            if idx < len - 1 {
+                self.list_state.select(Some(idx + 1))
+            } else {
+                self.list_state.select(Some(0))
+            }
+        }
     }
 }
 
@@ -278,32 +324,12 @@ fn ui_dir(frame: &mut Frame, dir_block_layout: Rect, app: &mut App) {
     )
     .split(dir_child);
 
-    ui_dir_files(
-        frame,
-        dir_layout[0],
-        &app.dir_info.parent,
-        &app.dir_info.selected_map,
-    );
-    ui_dir_files(
-        frame,
-        dir_layout[1],
-        &app.dir_info.current,
-        &app.dir_info.selected_map,
-    );
-    ui_dir_files(
-        frame,
-        dir_layout[2],
-        &app.dir_info.child,
-        &app.dir_info.selected_map,
-    );
+    ui_dir_files(frame, dir_layout[0], &mut app.dir_info.parent);
+    ui_dir_files(frame, dir_layout[1], &mut app.dir_info.current);
+    ui_dir_files(frame, dir_layout[2], &mut app.dir_info.child);
 }
 
-fn ui_dir_files(
-    frame: &mut Frame,
-    parent_dir_layout: Rect,
-    path_info: &Option<PathInfo>,
-    selected_map: &HashMap<PathBuf, usize>,
-) {
+fn ui_dir_files(frame: &mut Frame, parent_dir_layout: Rect, path_info: &mut Option<PathInfo>) {
     if let Some(path_info) = path_info {
         let title = match path_info.path_type {
             PathType::Parent => "Parent",
@@ -330,7 +356,7 @@ fn ui_dir_files(
                     .add_modifier(Modifier::BOLD),
             )
             .direction(ListDirection::TopToBottom);
-        frame.render_widget(dir_list, parent_dir_layout);
+        frame.render_stateful_widget(dir_list, parent_dir_layout, &mut path_info.list_state);
     }
 }
 
