@@ -1,5 +1,6 @@
 use std::{
     cmp::Ordering,
+    collections::HashMap,
     env::current_dir,
     io::{self, stdout},
     path::{Path, PathBuf},
@@ -8,7 +9,7 @@ use std::{
 };
 
 use crossterm::{
-    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers, ModifierKeyCode},
+    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     ExecutableCommand,
 };
@@ -115,38 +116,70 @@ impl App {
 }
 
 struct DirInfo {
-    current_dir: PathBuf,
-    current_state: ListState,
-    parent_dir_files: Vec<PathBuf>,
-    current_dir_files: Vec<PathBuf>,
-    child_dir_files: Vec<PathBuf>,
-    selected_file_idx: usize,
+    parent: Option<PathInfo>,
+    current: Option<PathInfo>,
+    child: Option<PathInfo>,
+    selected_map: HashMap<PathBuf, usize>,
 }
 
 impl DirInfo {
     fn new(current_dir: PathBuf) -> io::Result<Self> {
-        let mut current_state = ListState::default();
-        current_state.select(Some(0));
-        let mut parent_dir_files = vec![];
-        let mut current_dir_files = vec![];
-        let mut child_dir_files = vec![];
-        let selected_file_idx = 0;
-        if let Some(parent_dir) = current_dir.parent() {
-            get_files(parent_dir, &mut parent_dir_files)?
-        }
-        get_files(&current_dir, &mut current_dir_files)?;
-        if current_dir_files.len() > 0 && current_dir_files[selected_file_idx].is_dir() {
-            get_files(&current_dir_files[selected_file_idx], &mut child_dir_files)?;
-        }
+        let selected_map = HashMap::new();
+
+        let parent = if let Some(parent) = current_dir.parent() {
+            Some(PathInfo::new(PathBuf::from(parent), PathType::Parent)?)
+        } else {
+            None
+        };
+        let current = PathInfo::new(current_dir, PathType::Current)?;
+        let current_files = &current.files;
+        let child = if let Some(first_file) = current_files.first() {
+            if first_file.is_dir() {
+                Some(PathInfo::new(first_file.clone(), PathType::Child)?)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         let s = Self {
-            current_dir,
-            current_state,
-            parent_dir_files,
-            current_dir_files,
-            child_dir_files,
-            selected_file_idx,
+            parent,
+            current: Some(current),
+            child,
+            selected_map,
         };
         Ok(s)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PathType {
+    Parent,
+    Current,
+    Child,
+}
+
+struct PathInfo {
+    path: PathBuf,
+    path_type: PathType,
+    list_state: ListState,
+    files: Vec<PathBuf>,
+}
+
+impl PathInfo {
+    fn new(path: PathBuf, path_type: PathType) -> io::Result<Self> {
+        let mut list_state = ListState::default();
+        list_state.select(Some(0));
+        let mut files = vec![];
+        get_files(&path, &mut files);
+
+        Ok(Self {
+            path,
+            path_type,
+            list_state,
+            files,
+        })
     }
 }
 
@@ -245,92 +278,60 @@ fn ui_dir(frame: &mut Frame, dir_block_layout: Rect, app: &mut App) {
     )
     .split(dir_child);
 
-    ui_parent_dir(frame, dir_layout[0], app);
-    ui_current_dir(frame, dir_layout[1], app);
-    ui_child_dir(frame, dir_layout[2], app);
-}
-
-fn ui_parent_dir(frame: &mut Frame, parent_dir_layout: Rect, app: &mut App) {
-    let items: Vec<ListItem> = app
-        .dir_info
-        .parent_dir_files
-        .iter()
-        .map(|p| {
-            let lines = vec![path_last_n(p, 2).into()];
-            ListItem::new(lines).style(Style::default().fg(COLOR_FG).bg(COLOR_BG))
-        })
-        .collect();
-    let dir_list = List::new(items)
-        .block(
-            Block::bordered()
-                .title("Parent Dir")
-                .style(Style::default().gray()),
-        )
-        .highlight_style(
-            Style::default()
-                .bg(COLOR_HIGHLIGHT)
-                .add_modifier(Modifier::BOLD),
-        )
-        .direction(ListDirection::TopToBottom);
-    frame.render_widget(dir_list, parent_dir_layout);
-}
-
-fn ui_current_dir(frame: &mut Frame, current_dir_layout: Rect, app: &mut App) {
-    let items: Vec<ListItem> = app
-        .dir_info
-        .current_dir_files
-        .iter()
-        .map(|p| {
-            let lines = vec![path_last_n(p, 2).into()];
-            ListItem::new(lines).style(Style::default().fg(COLOR_FG).bg(COLOR_BG))
-        })
-        .collect();
-    let dir_list = List::new(items)
-        .block(
-            Block::bordered()
-                .title("Current Dir")
-                .style(Style::default().gray()),
-        )
-        .highlight_style(
-            Style::default()
-                .bg(COLOR_HIGHLIGHT)
-                .add_modifier(Modifier::BOLD),
-        )
-        .highlight_symbol("-> ")
-        .direction(ListDirection::TopToBottom);
-
-    frame.render_stateful_widget(
-        dir_list,
-        current_dir_layout,
-        &mut app.dir_info.current_state,
+    ui_dir_files(
+        frame,
+        dir_layout[0],
+        &app.dir_info.parent,
+        &app.dir_info.selected_map,
     );
-    // frame.render_widget(dir_list, current_dir_layout);
+    ui_dir_files(
+        frame,
+        dir_layout[1],
+        &app.dir_info.current,
+        &app.dir_info.selected_map,
+    );
+    ui_dir_files(
+        frame,
+        dir_layout[2],
+        &app.dir_info.child,
+        &app.dir_info.selected_map,
+    );
 }
 
-fn ui_child_dir(frame: &mut Frame, child_dir_layout: Rect, app: &mut App) {
-    let items: Vec<ListItem> = app
-        .dir_info
-        .child_dir_files
-        .iter()
-        .map(|p| {
-            let lines = vec![path_last_n(p, 2).into()];
-            ListItem::new(lines).style(Style::default().fg(COLOR_FG).bg(COLOR_BG))
-        })
-        .collect();
-    let dir_list = List::new(items)
-        .block(
-            Block::bordered()
-                .title("Child Dir")
-                .style(Style::default().gray()),
-        )
-        .highlight_style(
-            Style::default()
-                .bg(COLOR_HIGHLIGHT)
-                .add_modifier(Modifier::BOLD),
-        )
-        .direction(ListDirection::TopToBottom);
-
-    frame.render_widget(dir_list, child_dir_layout);
+fn ui_dir_files(
+    frame: &mut Frame,
+    parent_dir_layout: Rect,
+    path_info: &Option<PathInfo>,
+    selected_map: &HashMap<PathBuf, usize>,
+) {
+    if let Some(path_info) = path_info {
+        let title = match path_info.path_type {
+            PathType::Parent => "Parent",
+            PathType::Current => "Current",
+            PathType::Child => "Child",
+        };
+        let items: Vec<ListItem> = path_info
+            .files
+            .iter()
+            .map(|p| {
+                let lines = vec![path_last_n(p, 2).into()];
+                ListItem::new(lines).style(Style::default().fg(COLOR_FG).bg(COLOR_BG))
+            })
+            .collect();
+        let dir_list = List::new(items)
+            .block(
+                Block::bordered()
+                    .title(title)
+                    .style(Style::default().gray()),
+            )
+            .highlight_style(
+                Style::default()
+                    .bg(COLOR_HIGHLIGHT)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .direction(ListDirection::TopToBottom);
+        frame.render_widget(dir_list, parent_dir_layout);
+    }
 }
 
 fn ui_shares(frame: &mut Frame, share_layout: Rect, app: &mut App) {
