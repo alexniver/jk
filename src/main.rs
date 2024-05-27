@@ -82,16 +82,37 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
                             }
                         }
                     }
-                    KeyCode::Char('j') => {
-                        if app.current_block == CurrentBlock::Dir {
-                            app.dir_info.set_current_list_state_next();
+                    KeyCode::Char('j') => match app.current_block {
+                        CurrentBlock::Dir => {
+                            app.dir_info.set_current_list_state_next()?;
                         }
-                    }
-                    KeyCode::Char('k') => {
-                        if app.current_block == CurrentBlock::Dir {
-                            app.dir_info.set_current_list_state_prev();
+                        CurrentBlock::Shares => {
+                            app.share_info.next();
                         }
-                    }
+                    },
+                    KeyCode::Char('k') => match app.current_block {
+                        CurrentBlock::Dir => {
+                            app.dir_info.set_current_list_state_prev()?;
+                        }
+                        CurrentBlock::Shares => {
+                            app.share_info.prev();
+                        }
+                    },
+                    KeyCode::Char('=') => match app.current_block {
+                        CurrentBlock::Dir => {
+                            if let Some(file) = app.get_current_select_file() {
+                                if file.is_file() {
+                                    app.share_info.add(file);
+                                }
+                            }
+                        }
+                        CurrentBlock::Shares => {}
+                    },
+
+                    KeyCode::Char('-') => match app.current_block {
+                        CurrentBlock::Dir => {}
+                        CurrentBlock::Shares => app.share_info.remove(),
+                    },
                     _ => {}
                 }
             }
@@ -128,6 +149,15 @@ impl App {
 
     fn set_current_block(&mut self, target_block: CurrentBlock) {
         self.current_block = target_block
+    }
+
+    fn get_current_select_file(&self) -> Option<PathBuf> {
+        if let Some(current) = &self.dir_info.current {
+            if let Some(idx) = current.list_state.selected() {
+                return Some(current.files[idx].clone());
+            }
+        }
+        None
     }
 }
 
@@ -179,40 +209,43 @@ impl DirInfo {
         Ok(())
     }
 
-    fn set_current_list_state(&mut self, idx: usize) {
+    fn set_current_list_state(&mut self, idx: usize) -> io::Result<()> {
         if let Some(ref mut current) = self.current {
             current.list_state.select(Some(idx));
             self.selected_map.insert(current.path.clone(), idx);
             if let Some(ref mut child) = self.child {
-                child.set_path(current.files[idx].clone());
+                child.set_path(current.files[idx].clone())?;
             }
         }
+        Ok(())
     }
 
-    fn set_current_list_state_prev(&mut self) {
+    fn set_current_list_state_prev(&mut self) -> io::Result<()> {
         if let Some(ref mut current) = self.current {
             let len = current.files.len();
             if let Some(idx) = current.list_state.selected() {
                 if idx > 0 {
-                    self.set_current_list_state(idx - 1);
+                    self.set_current_list_state(idx - 1)?;
                 } else {
-                    self.set_current_list_state(len - 1);
+                    self.set_current_list_state(len - 1)?;
                 }
             }
         }
+        Ok(())
     }
 
-    fn set_current_list_state_next(&mut self) {
+    fn set_current_list_state_next(&mut self) -> io::Result<()> {
         if let Some(ref mut current) = self.current {
             let len = current.files.len();
             if let Some(idx) = current.list_state.selected() {
                 if idx < len - 1 {
-                    self.set_current_list_state(idx + 1)
+                    self.set_current_list_state(idx + 1)?;
                 } else {
-                    self.set_current_list_state(0)
+                    self.set_current_list_state(0)?;
                 }
             }
         }
+        Ok(())
     }
 }
 
@@ -300,21 +333,83 @@ impl PathInfo {
     }
 }
 
-struct ShareInfo {}
+struct ShareInfo {
+    path_arr: Vec<PathBuf>,
+    list_state: ListState,
+}
 
 impl ShareInfo {
     fn new() -> Self {
-        Self {}
+        let mut list_state = ListState::default();
+        list_state.select(Some(0));
+        Self {
+            path_arr: vec![],
+            list_state,
+        }
+    }
+
+    fn add(&mut self, path_buf: PathBuf) {
+        self.path_arr.push(path_buf);
+        sort_files(&mut self.path_arr);
+    }
+
+    fn remove(&mut self) {
+        if let Some(idx) = self.list_state.selected() {
+            self.path_arr.remove(idx);
+            let len = self.path_arr.len();
+            if idx >= len {
+                if len > 0 {
+                    self.list_state.select(Some(len - 1));
+                } else {
+                    self.list_state.select(None);
+                }
+            }
+        }
+    }
+
+    fn prev(&mut self) {
+        if let Some(idx) = self.list_state.selected() {
+            let len = self.path_arr.len();
+            if idx > 0 {
+                self.list_state.select(Some(idx - 1));
+            } else {
+                self.list_state.select(Some(len - 1));
+            }
+        }
+    }
+
+    fn next(&mut self) {
+        if let Some(idx) = self.list_state.selected() {
+            let len = self.path_arr.len();
+            if idx < len - 1 {
+                self.list_state.select(Some(idx + 1));
+            } else {
+                self.list_state.select(Some(0));
+            }
+        }
+    }
+
+    fn clear(&mut self) {
+        self.path_arr.clear();
+        self.list_state.select(Some(0));
     }
 }
 
 fn get_files(dir: &Path, files: &mut Vec<PathBuf>) -> io::Result<()> {
     files.clear();
-    for entry in std::fs::read_dir(dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        files.push(path);
+    if dir.is_dir() {
+        for entry in std::fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            files.push(path);
+        }
+        sort_files(files);
     }
+
+    Ok(())
+}
+
+fn sort_files(files: &mut Vec<PathBuf>) {
     files.sort_by(|a, b| {
         if a.is_dir() && b.is_file() {
             Ordering::Less
@@ -328,7 +423,6 @@ fn get_files(dir: &Path, files: &mut Vec<PathBuf>) -> io::Result<()> {
             }
         }
     });
-    Ok(())
 }
 
 fn path_last_n(path: &Path, n: usize) -> String {
@@ -405,7 +499,7 @@ fn ui_dir(frame: &mut Frame, dir_block_layout: Rect, app: &mut App) {
     ui_dir_files(frame, dir_layout[2], &mut app.dir_info.child);
 }
 
-fn ui_dir_files(frame: &mut Frame, parent_dir_layout: Rect, path_info: &mut Option<PathInfo>) {
+fn ui_dir_files(frame: &mut Frame, dir_layout: Rect, path_info: &mut Option<PathInfo>) {
     if let Some(path_info) = path_info {
         let title = match path_info.path_type {
             PathType::Parent => "Parent",
@@ -432,7 +526,7 @@ fn ui_dir_files(frame: &mut Frame, parent_dir_layout: Rect, path_info: &mut Opti
                     .add_modifier(Modifier::BOLD),
             )
             .direction(ListDirection::TopToBottom);
-        frame.render_stateful_widget(dir_list, parent_dir_layout, &mut path_info.list_state);
+        frame.render_stateful_widget(dir_list, dir_layout, &mut path_info.list_state);
     }
 }
 
@@ -441,7 +535,24 @@ fn ui_shares(frame: &mut Frame, share_layout: Rect, app: &mut App) {
     if app.get_current_block() == CurrentBlock::Shares {
         block = block.style(Style::new().fg(Color::Yellow).bold());
     }
-    frame.render_widget(block, share_layout);
+    let items: Vec<ListItem> = app
+        .share_info
+        .path_arr
+        .iter()
+        .map(|p| {
+            let lines = vec![path_last_n(p, 2).into()];
+            ListItem::new(lines).style(Style::default().fg(COLOR_FG).bg(COLOR_BG))
+        })
+        .collect();
+    let dir_list = List::new(items)
+        .block(block)
+        .highlight_style(
+            Style::default()
+                .bg(COLOR_HIGHLIGHT)
+                .add_modifier(Modifier::BOLD),
+        )
+        .direction(ListDirection::TopToBottom);
+    frame.render_stateful_widget(dir_list, share_layout, &mut app.share_info.list_state);
 }
 
 fn ui_title(frame: &mut Frame, title_layout: Rect) {
