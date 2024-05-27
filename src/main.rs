@@ -16,6 +16,10 @@ use ratatui::{prelude::*, widgets::*};
 
 const PORT: u16 = 33231;
 
+const COLOR_FG: Color = Color::Green;
+const COLOR_BG: Color = Color::Black;
+const COLOR_HIGHLIGHT: Color = Color::LightRed;
+
 fn main() -> io::Result<()> {
     match current_dir() {
         Ok(dir) => {
@@ -112,6 +116,7 @@ impl App {
 
 struct DirInfo {
     current_dir: PathBuf,
+    current_state: ListState,
     parent_dir_files: Vec<PathBuf>,
     current_dir_files: Vec<PathBuf>,
     child_dir_files: Vec<PathBuf>,
@@ -120,6 +125,8 @@ struct DirInfo {
 
 impl DirInfo {
     fn new(current_dir: PathBuf) -> io::Result<Self> {
+        let mut current_state = ListState::default();
+        current_state.select(Some(0));
         let mut parent_dir_files = vec![];
         let mut current_dir_files = vec![];
         let mut child_dir_files = vec![];
@@ -133,6 +140,7 @@ impl DirInfo {
         }
         let s = Self {
             current_dir,
+            current_state,
             parent_dir_files,
             current_dir_files,
             child_dir_files,
@@ -171,6 +179,19 @@ fn get_files(dir: &Path, files: &mut Vec<PathBuf>) -> io::Result<()> {
         }
     });
     Ok(())
+}
+
+fn path_last_n(path: &Path, n: usize) -> String {
+    let last_three_components: Vec<String> = path
+        .components()
+        .rev()
+        // .skip_while(|c| c != &std::path::Component::Normal(std::ffi::OsStr::new("")))
+        .take(n)
+        .map(|c| c.as_os_str().to_string_lossy().to_string())
+        .collect(); // 收集到Vec中
+    let last_three_components: Vec<String> = last_three_components.into_iter().rev().collect();
+    // 将这三个部分连接成一个String，用路径分隔符连接（这里假设使用Unix风格的分隔符）
+    last_three_components.join("/")
 }
 
 fn ui(frame: &mut Frame, app: &mut App) {
@@ -235,9 +256,8 @@ fn ui_parent_dir(frame: &mut Frame, parent_dir_layout: Rect, app: &mut App) {
         .parent_dir_files
         .iter()
         .map(|p| {
-            let mut lines = vec![p.to_str().unwrap().into()];
-
-            ListItem::new(lines).style(Style::default().fg(Color::Black).bg(Color::White))
+            let lines = vec![path_last_n(p, 2).into()];
+            ListItem::new(lines).style(Style::default().fg(COLOR_FG).bg(COLOR_BG))
         })
         .collect();
     let dir_list = List::new(items)
@@ -245,6 +265,11 @@ fn ui_parent_dir(frame: &mut Frame, parent_dir_layout: Rect, app: &mut App) {
             Block::bordered()
                 .title("Parent Dir")
                 .style(Style::default().gray()),
+        )
+        .highlight_style(
+            Style::default()
+                .bg(COLOR_HIGHLIGHT)
+                .add_modifier(Modifier::BOLD),
         )
         .direction(ListDirection::TopToBottom);
     frame.render_widget(dir_list, parent_dir_layout);
@@ -256,9 +281,8 @@ fn ui_current_dir(frame: &mut Frame, current_dir_layout: Rect, app: &mut App) {
         .current_dir_files
         .iter()
         .map(|p| {
-            let mut lines = vec![p.to_str().unwrap().into()];
-
-            ListItem::new(lines).style(Style::default().fg(Color::Black).bg(Color::White))
+            let lines = vec![path_last_n(p, 2).into()];
+            ListItem::new(lines).style(Style::default().fg(COLOR_FG).bg(COLOR_BG))
         })
         .collect();
     let dir_list = List::new(items)
@@ -267,8 +291,20 @@ fn ui_current_dir(frame: &mut Frame, current_dir_layout: Rect, app: &mut App) {
                 .title("Current Dir")
                 .style(Style::default().gray()),
         )
+        .highlight_style(
+            Style::default()
+                .bg(COLOR_HIGHLIGHT)
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol("-> ")
         .direction(ListDirection::TopToBottom);
-    frame.render_widget(dir_list, current_dir_layout);
+
+    frame.render_stateful_widget(
+        dir_list,
+        current_dir_layout,
+        &mut app.dir_info.current_state,
+    );
+    // frame.render_widget(dir_list, current_dir_layout);
 }
 
 fn ui_child_dir(frame: &mut Frame, child_dir_layout: Rect, app: &mut App) {
@@ -277,9 +313,8 @@ fn ui_child_dir(frame: &mut Frame, child_dir_layout: Rect, app: &mut App) {
         .child_dir_files
         .iter()
         .map(|p| {
-            let mut lines = vec![p.to_str().unwrap().into()];
-
-            ListItem::new(lines).style(Style::default().fg(Color::Black).bg(Color::White))
+            let lines = vec![path_last_n(p, 2).into()];
+            ListItem::new(lines).style(Style::default().fg(COLOR_FG).bg(COLOR_BG))
         })
         .collect();
     let dir_list = List::new(items)
@@ -287,6 +322,11 @@ fn ui_child_dir(frame: &mut Frame, child_dir_layout: Rect, app: &mut App) {
             Block::bordered()
                 .title("Child Dir")
                 .style(Style::default().gray()),
+        )
+        .highlight_style(
+            Style::default()
+                .bg(COLOR_HIGHLIGHT)
+                .add_modifier(Modifier::BOLD),
         )
         .direction(ListDirection::TopToBottom);
 
