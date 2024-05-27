@@ -108,11 +108,13 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
                         }
                         CurrentBlock::Shares => {}
                     },
-
                     KeyCode::Char('-') => match app.current_block {
                         CurrentBlock::Dir => {}
                         CurrentBlock::Shares => app.share_info.remove(),
                     },
+                    KeyCode::Char('C') => {
+                        app.share_info.clear();
+                    }
                     _ => {}
                 }
             }
