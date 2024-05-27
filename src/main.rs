@@ -64,6 +64,7 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
                                 CurrentBlock::Shares => app.set_current_block(CurrentBlock::Dir),
                             }
                         } else {
+                            app.dir_info.set_current_to_parent()?;
                         }
                     }
                     KeyCode::Char('l') => {
@@ -74,17 +75,14 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
                                 CurrentBlock::Shares => app.set_current_block(CurrentBlock::Dir),
                             }
                         } else {
+                            app.dir_info.set_current_to_child()?;
                         }
                     }
                     KeyCode::Char('j') => {
-                        if let Some(ref mut current) = app.dir_info.current {
-                            current.set_list_state_next()
-                        }
+                        app.dir_info.set_current_list_state_next();
                     }
                     KeyCode::Char('k') => {
-                        if let Some(ref mut current) = app.dir_info.current {
-                            current.set_list_state_prev()
-                        }
+                        app.dir_info.set_current_list_state_prev();
                     }
                     _ => {}
                 }
@@ -135,40 +133,120 @@ struct DirInfo {
 impl DirInfo {
     fn new(current_dir: PathBuf) -> io::Result<Self> {
         let mut selected_map = HashMap::new();
-
-        let parent = if let Some(parent) = current_dir.parent() {
-            let mut path_info = PathInfo::new(PathBuf::from(parent), PathType::Parent)?;
-            for (idx, p) in path_info.files.iter().enumerate() {
-                if p == &current_dir {
-                    selected_map.insert(PathBuf::from(parent), idx);
-                }
-            }
-            path_info.set_list_state(&selected_map);
-            Some(path_info)
-        } else {
-            None
-        };
-
-        let current = PathInfo::new(current_dir, PathType::Current)?;
-        let current_files = &current.files;
-        let child = if let Some(first_file) = current_files.first() {
-            if first_file.is_dir() {
-                Some(PathInfo::new(first_file.clone(), PathType::Child)?)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
+        let (parent, current, child) = gen_parent_current_child(current_dir, &mut selected_map)?;
         let s = Self {
             parent,
-            current: Some(current),
+            current,
             child,
             selected_map,
         };
         Ok(s)
     }
+
+    fn set_current_dir(&mut self, path_buf: PathBuf) -> io::Result<()> {
+        if let Some(current) = &self.current {
+            if current.path == path_buf {
+                return Ok(());
+            }
+            let (parent, current, child) =
+                gen_parent_current_child(path_buf, &mut self.selected_map)?;
+            self.parent = parent;
+            self.current = current;
+            self.child = child;
+        }
+        Ok(())
+    }
+
+    fn set_current_to_parent(&mut self) -> io::Result<()> {
+        if let Some(parent) = &self.parent {
+            self.set_current_dir(parent.path.clone())?;
+        }
+        Ok(())
+    }
+
+    fn set_current_to_child(&mut self) -> io::Result<()> {
+        if let Some(child) = &self.child {
+            self.set_current_dir(child.path.clone())?;
+        }
+        Ok(())
+    }
+
+    fn set_current_list_state(&mut self, idx: usize) {
+        if let Some(ref mut current) = self.current {
+            current.list_state.select(Some(idx));
+            self.selected_map.insert(current.path.clone(), idx);
+            if let Some(ref mut child) = self.child {
+                child.set_path(current.files[idx].clone());
+            }
+        }
+    }
+
+    fn set_current_list_state_prev(&mut self) {
+        if let Some(ref mut current) = self.current {
+            let len = current.files.len();
+            if let Some(idx) = current.list_state.selected() {
+                if idx > 0 {
+                    self.set_current_list_state(idx - 1);
+                } else {
+                    self.set_current_list_state(len - 1);
+                }
+            }
+        }
+    }
+
+    fn set_current_list_state_next(&mut self) {
+        if let Some(ref mut current) = self.current {
+            let len = current.files.len();
+            if let Some(idx) = current.list_state.selected() {
+                if idx < len - 1 {
+                    self.set_current_list_state(idx + 1)
+                } else {
+                    self.set_current_list_state(0)
+                }
+            }
+        }
+    }
+}
+
+fn gen_parent_current_child(
+    current_dir: PathBuf,
+    selected_map: &mut HashMap<PathBuf, usize>,
+) -> io::Result<(Option<PathInfo>, Option<PathInfo>, Option<PathInfo>)> {
+    let parent = if let Some(parent) = current_dir.parent() {
+        let mut path_info = PathInfo::new(PathBuf::from(parent), PathType::Parent)?;
+        let mut parent_selected_idx = 0;
+        for (idx, p) in path_info.files.iter().enumerate() {
+            if p == &current_dir {
+                selected_map.insert(PathBuf::from(parent), idx);
+                parent_selected_idx = idx;
+            }
+        }
+        selected_map.insert(path_info.path.clone(), parent_selected_idx);
+        path_info.auto_select(selected_map);
+        Some(path_info)
+    } else {
+        None
+    };
+
+    let mut current = PathInfo::new(current_dir, PathType::Current)?;
+    current.auto_select(selected_map);
+
+    let selected_idx = if let Some(selected_idx) = current.list_state.selected() {
+        selected_idx
+    } else {
+        0
+    };
+    let file = &current.files[selected_idx];
+
+    let child = if file.is_dir() {
+        let mut path_info = PathInfo::new(file.clone(), PathType::Child)?;
+        path_info.auto_select(selected_map);
+        Some(path_info)
+    } else {
+        None
+    };
+
+    Ok((parent, Some(current), child))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -201,31 +279,16 @@ impl PathInfo {
         })
     }
 
-    fn set_list_state(&mut self, selected_map: &HashMap<PathBuf, usize>) {
+    fn auto_select(&mut self, selected_map: &HashMap<PathBuf, usize>) {
         if let Some(&idx) = selected_map.get(&self.path) {
             self.list_state.select(Some(idx));
         }
     }
 
-    fn set_list_state_prev(&mut self) {
-        if let Some(idx) = self.list_state.selected() {
-            if idx > 0 {
-                self.list_state.select(Some(idx - 1))
-            } else {
-                self.list_state.select(Some(self.files.len() - 1))
-            }
-        }
-    }
-
-    fn set_list_state_next(&mut self) {
-        let len = self.files.len();
-        if let Some(idx) = self.list_state.selected() {
-            if idx < len - 1 {
-                self.list_state.select(Some(idx + 1))
-            } else {
-                self.list_state.select(Some(0))
-            }
-        }
+    fn set_path(&mut self, path_buf: PathBuf) -> io::Result<()> {
+        get_files(&path_buf, &mut self.files)?;
+        self.path = path_buf;
+        Ok(())
     }
 }
 
@@ -267,10 +330,15 @@ fn path_last_n(path: &Path, n: usize) -> String {
         // .skip_while(|c| c != &std::path::Component::Normal(std::ffi::OsStr::new("")))
         .take(n)
         .map(|c| c.as_os_str().to_string_lossy().to_string())
-        .collect(); // 收集到Vec中
+        .collect();
     let last_three_components: Vec<String> = last_three_components.into_iter().rev().collect();
-    // 将这三个部分连接成一个String，用路径分隔符连接（这里假设使用Unix风格的分隔符）
-    last_three_components.join("/")
+
+    let mut result = last_three_components.join("/");
+
+    if path.is_dir() {
+        result.push('/');
+    }
+    result
 }
 
 fn ui(frame: &mut Frame, app: &mut App) {
