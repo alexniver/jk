@@ -64,7 +64,9 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
                                 CurrentBlock::Shares => app.set_current_block(CurrentBlock::Dir),
                             }
                         } else {
-                            app.dir_info.set_current_to_parent()?;
+                            if app.current_block == CurrentBlock::Dir {
+                                app.dir_info.set_current_to_parent()?;
+                            }
                         }
                     }
                     KeyCode::Char('l') => {
@@ -75,14 +77,20 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
                                 CurrentBlock::Shares => app.set_current_block(CurrentBlock::Dir),
                             }
                         } else {
-                            app.dir_info.set_current_to_child()?;
+                            if app.current_block == CurrentBlock::Dir {
+                                app.dir_info.set_current_to_child()?;
+                            }
                         }
                     }
                     KeyCode::Char('j') => {
-                        app.dir_info.set_current_list_state_next();
+                        if app.current_block == CurrentBlock::Dir {
+                            app.dir_info.set_current_list_state_next();
+                        }
                     }
                     KeyCode::Char('k') => {
-                        app.dir_info.set_current_list_state_prev();
+                        if app.current_block == CurrentBlock::Dir {
+                            app.dir_info.set_current_list_state_prev();
+                        }
                     }
                     _ => {}
                 }
