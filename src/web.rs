@@ -1,20 +1,27 @@
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use askama::Template;
 use askama_axum::IntoResponse;
 use axum::{
+    body::Body,
     extract::{
         ws::{Message, WebSocket},
-        State, WebSocketUpgrade,
+        Query, State, WebSocketUpgrade,
     },
     routing::get,
     Router,
 };
-use futures::{SinkExt, StreamExt};
+use futures::{io::BufReader, SinkExt, StreamExt};
+use serde::Deserialize;
 use tokio::{
+    fs::File,
     runtime::Runtime,
     sync::{mpsc::Receiver, oneshot, RwLock},
 };
+use tokio_util::io::ReaderStream;
 
 use crate::consts::PORT;
 
@@ -59,6 +66,7 @@ pub fn run(
             let app_state = AppState::new(rx, share_path_arr);
             let app = Router::new()
                 .route("/", get(index))
+                .route("/download", get(download))
                 .route("/websocket", get(websocket_handler))
                 .with_state(app_state);
 
@@ -97,6 +105,33 @@ async fn websocket(stream: WebSocket, state: AppState) {
             break;
         }
     }
+}
+
+#[derive(Deserialize)]
+struct DownloadParam {
+    path: String,
+}
+
+async fn download(Query(p): Query<DownloadParam>) -> impl IntoResponse {
+    // 调用上面定义的函数来处理下载
+    match stream_file(Path::new(&p.path)).await {
+        Ok(response_body) => response_body.into_response(),
+        Err(e) => {
+            eprintln!("Error streaming file: {}", e);
+            // 返回一个错误响应，实际应用中可能需要更详细的错误处理
+            (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to stream file",
+            )
+                .into_response()
+        }
+    }
+}
+
+async fn stream_file(path: &Path) -> Result<impl IntoResponse, std::io::Error> {
+    let file = File::open(path).await?;
+    let stream = ReaderStream::new(tokio::io::BufReader::new(file));
+    Ok(Body::from_stream(stream))
 }
 
 async fn path_arr_2_file_arr(path_arr: Arc<RwLock<Vec<PathBuf>>>) -> Vec<FileInfo> {
