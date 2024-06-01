@@ -11,6 +11,7 @@ use axum::{
         ws::{Message, WebSocket},
         Query, State, WebSocketUpgrade,
     },
+    http::StatusCode,
     routing::get,
     Router,
 };
@@ -40,13 +41,14 @@ impl AppState {
 #[derive(Template)]
 #[template(path = "index.html")]
 pub struct IndexTemplate {
-    pub file_arr: Vec<FileInfo>,
+    list_content: String,
 }
 
 #[derive(Template)]
 #[template(path = "file_list.html")]
 pub struct FileListTemplate {
     pub file_arr: Vec<FileInfo>,
+    pub is_hx_swap_oob: bool,
 }
 
 pub struct FileInfo {
@@ -85,8 +87,13 @@ pub fn run(
 }
 
 async fn index(State(state): State<AppState>) -> impl IntoResponse {
-    IndexTemplate {
+    let file_list = FileListTemplate {
         file_arr: path_arr_2_file_arr(state.share_path_arr).await,
+        is_hx_swap_oob: false,
+    };
+    match file_list.render() {
+        Ok(list_content) => IndexTemplate { list_content }.into_response(),
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 }
 
@@ -100,9 +107,28 @@ async fn websocket_handler(
 async fn websocket(stream: WebSocket, state: AppState) {
     let (mut sender, _) = stream.split();
     let mut rx = state.rx.write().await;
+
+    let list_string = get_list_string(state.clone()).await;
+    let _ = sender.send(Message::Text(list_string.to_string())).await;
+
     while let Some(_) = rx.recv().await {
-        if sender.send(Message::Text("".to_string())).await.is_err() {
+        let list_string = get_list_string(state.clone()).await;
+        if sender.send(Message::Text(list_string)).await.is_err() {
             break;
+        }
+    }
+}
+
+async fn get_list_string(state: AppState) -> String {
+    let list = FileListTemplate {
+        file_arr: path_arr_2_file_arr(state.share_path_arr).await,
+        is_hx_swap_oob: true,
+    };
+    match list.render() {
+        Ok(l) => l,
+        Err(e) => {
+            tracing::error!("list render fail, e: {}", e);
+            panic!("{}", e);
         }
     }
 }

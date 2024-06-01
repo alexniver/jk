@@ -8,9 +8,10 @@
 </head>
 
 <body>
-  <div id="content" class="bg-gray-200 p-4 h-full overflow-y-auto flex-grow">
+  <div id="content" hx-ext="ws" ws-connect="/websocket" class="bg-gray-200 p-4 h-full overflow-y-auto flex-grow">
     <div class="container mx-auto p-4">
-      {% include "file_list.html" %}
+      <div id="filelist" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+      </div>
     </div>
   </div>
 </body>
