@@ -11,11 +11,10 @@ use axum::{
         ws::{Message, WebSocket},
         Query, State, WebSocketUpgrade,
     },
-    http::StatusCode,
     routing::get,
     Router,
 };
-use futures::{io::BufReader, SinkExt, StreamExt};
+use futures::{SinkExt, StreamExt};
 use serde::Deserialize;
 use tokio::{
     fs::File,
@@ -40,9 +39,7 @@ impl AppState {
 
 #[derive(Template)]
 #[template(path = "index.html")]
-pub struct IndexTemplate {
-    list_content: String,
-}
+pub struct IndexTemplate;
 
 #[derive(Template)]
 #[template(path = "file_list.html")]
@@ -86,15 +83,8 @@ pub fn run(
     });
 }
 
-async fn index(State(state): State<AppState>) -> impl IntoResponse {
-    let file_list = FileListTemplate {
-        file_arr: path_arr_2_file_arr(state.share_path_arr).await,
-        is_hx_swap_oob: false,
-    };
-    match file_list.render() {
-        Ok(list_content) => IndexTemplate { list_content }.into_response(),
-        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-    }
+async fn index() -> impl IntoResponse {
+    IndexTemplate.into_response()
 }
 
 async fn websocket_handler(
