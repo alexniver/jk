@@ -1,33 +1,61 @@
-name: Release Build
+name: Release
 
 on:
-  release:
-    types: [created] # 当有新Release被创建时触发
+  push:
+    tags:
+      - 'v*'
 
 jobs:
   build:
-    runs-on: ubuntu-latest # 使用Ubuntu环境来执行跨平台编译
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        platform: [ubuntu-latest, windows-latest]
+
     steps:
-    - uses: actions/checkout@v3
-    - name: Setup Rust
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Set up Rust
       uses: actions-rs/toolchain@v1
       with:
-        profile: minimal
         toolchain: stable
-        targets: 
-          - x86_64-pc-windows-gnu
-          - x86_64-unknown-linux-gnu # 如果还没有的话，也可以一并添加确保Linux目标也被安装
-    - name: Build for Linux
-      run: cargo build --release --target=x86_64-unknown-linux-gnu
-    - name: Build for Windows
-      run: cargo build --release --target=x86_64-pc-windows-gnu
-    - name: Upload Linux Binary
-      uses: actions/upload-artifact@v3
+
+    - name: Install dependencies
+      run: |
+        if [ ${{ matrix.platform }} == 'windows-latest' ]; then
+          rustup target add x86_64-pc-windows-gnu
+        fi
+
+    - name: Build
+      run: |
+        if [ ${{ matrix.platform }} == 'ubuntu-latest' ]; then
+          cargo build --release
+        elif [ ${{ matrix.platform }} == 'windows-latest' ]; then
+          cargo build --release --target x86_64-pc-windows-gnu
+        fi
+
+    - name: Archive
+      if: matrix.platform == 'ubuntu-latest'
+      run: |
+        tar -czvf kk-linux.tar.gz -C target/release kk
+      shell: bash
+
+    - name: Archive
+      if: matrix.platform == 'windows-latest'
+      run: |
+        7z a kk-windows.zip target\x86_64-pc-windows-gnu\release\kk.exe
+      shell: cmd
+
+    - name: Upload Release Asset
+      uses: actions/upload-release-asset@v1
       with:
-        name: kk
-        path: target/x86_64-unknown-linux-gnu/release/kk
-    - name: Upload Windows Binary
-      uses: actions/upload-artifact@v3
-      with:
-        name: kk 
-        path: target/x86_64-pc-windows-gnu/release/kk.exe
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: |
+          ${{ github.workspace }}/kk-linux.tar.gz
+          ${{ github.workspace }}/kk-windows.zip
+        asset_name: |
+          kk-linux.tar.gz
+          kk-windows.zip
+        asset_content_type: application/zip
