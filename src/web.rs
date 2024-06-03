@@ -128,19 +128,34 @@ struct DownloadParam {
     path: String,
 }
 
-async fn download(Query(p): Query<DownloadParam>) -> impl IntoResponse {
-    // 调用上面定义的函数来处理下载
-    match stream_file(Path::new(&p.path)).await {
-        Ok(response_body) => response_body.into_response(),
-        Err(e) => {
-            eprintln!("Error streaming file: {}", e);
-            // 返回一个错误响应，实际应用中可能需要更详细的错误处理
-            (
-                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to stream file",
-            )
-                .into_response()
+async fn download(
+    Query(p): Query<DownloadParam>,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let path_to_download = Path::new(&p.path);
+    let share_path_arr = state.share_path_arr.read().await;
+    if share_path_arr.iter().any(|p| p.eq(path_to_download)) {
+        // 调用上面定义的函数来处理下载
+        match stream_file(Path::new(&p.path)).await {
+            Ok(response_body) => response_body.into_response(),
+            Err(e) => {
+                tracing::error!("Error streaming file: {}", e);
+                // 返回一个错误响应，实际应用中可能需要更详细的错误处理
+                (
+                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to stream file",
+                )
+                    .into_response()
+            }
         }
+    } else {
+        tracing::error!("Error streaming file, file isn't share");
+        // 返回一个错误响应，实际应用中可能需要更详细的错误处理
+        (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to stream file, file isn't share",
+        )
+            .into_response()
     }
 }
 
