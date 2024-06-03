@@ -27,7 +27,7 @@ jobs:
       run: |
         choco install mingw
         rustup target add x86_64-pc-windows-gnu
-      shell: cmd
+      shell: pwsh
 
     - name: Install dependencies on Linux
       if: matrix.platform == 'ubuntu-latest'
