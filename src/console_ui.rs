@@ -1,5 +1,4 @@
 use std::{
-    cmp::Ordering,
     collections::HashMap,
     io,
     net::IpAddr,
@@ -14,7 +13,7 @@ use local_ip_address::local_ip;
 use ratatui::{prelude::*, widgets::*};
 use tokio::sync::{mpsc::Sender, RwLock};
 
-use crate::consts::*;
+use crate::{consts::*, utils::sort_files};
 
 pub fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<()> {
     let local_ip_addr = local_ip().unwrap();
@@ -398,31 +397,27 @@ impl ShareInfo {
 fn get_files(dir: &Path, files: &mut Vec<PathBuf>) -> io::Result<()> {
     files.clear();
     if dir.is_dir() {
-        for entry in std::fs::read_dir(dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            files.push(path);
+        match std::fs::read_dir(dir) {
+            Ok(children) => {
+                for entry in children {
+                    match entry {
+                        Ok(entry) => {
+                            let path = entry.path();
+                            files.push(path);
+                        }
+                        // ignore error
+                        Err(_) => {}
+                    }
+                }
+            }
+            // ignore error
+            Err(_) => {}
         }
+
         sort_files(files);
     }
 
     Ok(())
-}
-
-fn sort_files(files: &mut Vec<PathBuf>) {
-    files.sort_by(|a, b| {
-        if a.is_dir() && b.is_file() {
-            Ordering::Less
-        } else if a.is_file() && b.is_dir() {
-            Ordering::Greater
-        } else {
-            if let (Some(a_name), Some(b_name)) = (a.file_name(), b.file_name()) {
-                a_name.cmp(b_name)
-            } else {
-                Ordering::Equal
-            }
-        }
-    });
 }
 
 fn path_last_n(path: &Path, n: usize) -> String {

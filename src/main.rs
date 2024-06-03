@@ -1,5 +1,6 @@
 mod console_ui;
 mod consts;
+mod utils;
 mod web;
 
 use std::{
