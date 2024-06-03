@@ -25,7 +25,6 @@ jobs:
     - name: Install dependencies on Windows
       if: matrix.platform == 'windows-latest'
       run: |
-        choco install mingw
         rustup target add x86_64-pc-windows-gnu
       shell: pwsh
 

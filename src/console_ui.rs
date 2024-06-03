@@ -1,7 +1,8 @@
 use std::{
     cmp::Ordering,
     collections::HashMap,
-    io::{self},
+    io,
+    net::IpAddr,
     path::{Path, PathBuf},
     sync::Arc,
     thread::sleep,
@@ -9,15 +10,18 @@ use std::{
 };
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use local_ip_address::local_ip;
 use ratatui::{prelude::*, widgets::*};
 use tokio::sync::{mpsc::Sender, RwLock};
 
 use crate::consts::*;
 
 pub fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<()> {
+    let local_ip_addr = local_ip().unwrap();
+
     loop {
         sleep(Duration::from_millis(50));
-        terminal.draw(|f| ui(f, &mut app))?;
+        terminal.draw(|f| ui(f, &mut app, local_ip_addr))?;
 
         let mut is_left_ctrl = false;
 
@@ -184,7 +188,9 @@ impl DirInfo {
 
     fn set_current_to_child(&mut self) -> io::Result<()> {
         if let Some(child) = &self.child {
-            self.set_current_dir(child.path.clone())?;
+            if child.path.is_dir() {
+                self.set_current_dir(child.path.clone())?;
+            }
         }
         Ok(())
     }
@@ -437,7 +443,7 @@ fn path_last_n(path: &Path, n: usize) -> String {
     result
 }
 
-fn ui(frame: &mut Frame, app: &mut App) {
+fn ui(frame: &mut Frame, app: &mut App, local_ip_addr: IpAddr) {
     let main_layout = Layout::new(
         Direction::Vertical,
         [
@@ -448,7 +454,7 @@ fn ui(frame: &mut Frame, app: &mut App) {
     )
     .split(frame.size());
 
-    ui_title(frame, main_layout[0]);
+    ui_title(frame, main_layout[0], local_ip_addr);
 
     ui_content(frame, main_layout[1], app);
 
@@ -550,9 +556,9 @@ fn ui_shares(frame: &mut Frame, share_layout: Rect, app: &mut App) {
     frame.render_stateful_widget(dir_list, share_layout, &mut app.share_info.list_state);
 }
 
-fn ui_title(frame: &mut Frame, title_layout: Rect) {
+fn ui_title(frame: &mut Frame, title_layout: Rect, local_ip_addr: IpAddr) {
     let title = Span::styled(
-        format!("Visit localhost:{PORT}"),
+        format!("Visit {}:{PORT}", local_ip_addr),
         Style::new()
             .fg(Color::LightBlue)
             .add_modifier(Modifier::BOLD),
