@@ -1,9 +1,6 @@
 name: Release Build
 
 on:
-  push:
-    branches:
-      - main # 触发工作流的分支，可以根据需要修改
   release:
     types: [created] # 当有新Release被创建时触发
 
