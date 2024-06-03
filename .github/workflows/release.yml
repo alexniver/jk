@@ -14,6 +14,9 @@ jobs:
       with:
         profile: minimal
         toolchain: stable
+        targets: 
+          - x86_64-pc-windows-gnu
+          - x86_64-unknown-linux-gnu # 如果还没有的话，也可以一并添加确保Linux目标也被安装
     - name: Build for Linux
       run: cargo build --release --target=x86_64-unknown-linux-gnu
     - name: Build for Windows
