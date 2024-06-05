@@ -19,7 +19,11 @@ use serde::Deserialize;
 use tokio::{
     fs::File,
     runtime::Runtime,
-    sync::{mpsc::Receiver, oneshot, RwLock},
+    sync::{
+        broadcast::{self},
+        mpsc::Receiver,
+        oneshot, RwLock,
+    },
 };
 use tokio_util::io::ReaderStream;
 
@@ -27,13 +31,15 @@ use crate::consts::PORT;
 
 #[derive(Debug, Clone)]
 struct AppState {
-    // 接收shares change event
-    rx: Arc<RwLock<Receiver<()>>>,
     share_path_arr: Arc<RwLock<Vec<PathBuf>>>,
+    broadcast_tx: broadcast::Sender<()>,
 }
 impl AppState {
-    fn new(rx: Arc<RwLock<Receiver<()>>>, share_path_arr: Arc<RwLock<Vec<PathBuf>>>) -> Self {
-        Self { rx, share_path_arr }
+    fn new(share_path_arr: Arc<RwLock<Vec<PathBuf>>>, broadcast_tx: broadcast::Sender<()>) -> Self {
+        Self {
+            share_path_arr,
+            broadcast_tx,
+        }
     }
 }
 
@@ -54,15 +60,24 @@ pub struct FileInfo {
 }
 
 pub fn run(
-    rx: Arc<RwLock<Receiver<()>>>,
+    mut rx: Receiver<()>,
     share_path_arr: Arc<RwLock<Vec<PathBuf>>>,
     shutdown_rx: oneshot::Receiver<()>,
 ) {
-    // 创建并启动一个新线程来运行Tokio事件循环
     std::thread::spawn(move || {
         let rt = Runtime::new().unwrap();
         rt.block_on(async {
-            let app_state = AppState::new(rx, share_path_arr);
+            let (broadcast_tx, _) = broadcast::channel(16);
+
+            let tx_clone = broadcast_tx.clone();
+            // rx 收到信号，广播
+            tokio::spawn(async move {
+                while (rx.recv().await).is_some() {
+                    let _ = tx_clone.send(());
+                }
+            });
+
+            let app_state = AppState::new(share_path_arr, broadcast_tx);
             let app = Router::new()
                 .route("/", get(index))
                 .route("/download", get(download))
@@ -96,15 +111,19 @@ async fn websocket_handler(
 
 async fn websocket(stream: WebSocket, state: AppState) {
     let (mut sender, _) = stream.split();
-    let mut rx = state.rx.write().await;
+    let mut rx = state.broadcast_tx.subscribe();
 
     let list_string = get_list_string(state.clone()).await;
     let _ = sender.send(Message::Text(list_string.to_string())).await;
 
-    while (rx.recv().await).is_some() {
+    while (rx.recv().await).is_ok() {
         let list_string = get_list_string(state.clone()).await;
-        if sender.send(Message::Text(list_string)).await.is_err() {
-            break;
+        match sender.send(Message::Text(list_string)).await {
+            Ok(_) => {}
+            Err(e) => {
+                tracing::error!("send message error: {e}");
+                break;
+            }
         }
     }
 }

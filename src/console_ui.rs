@@ -76,6 +76,7 @@ pub fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Resu
                             if let Some(file) = app.get_current_select_file() {
                                 if file.is_file() {
                                     app.share_info.add(file);
+                                    let _ = app.tx.blocking_send(());
                                 }
                             }
                         }
@@ -83,10 +84,14 @@ pub fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Resu
                     },
                     KeyCode::Char('-') => match app.current_block {
                         CurrentBlock::Dir => {}
-                        CurrentBlock::Shares => app.share_info.remove(),
+                        CurrentBlock::Shares => {
+                            app.share_info.remove();
+                            let _ = app.tx.blocking_send(());
+                        }
                     },
                     KeyCode::Char('C') => {
                         app.share_info.clear();
+                        let _ = app.tx.blocking_send(());
                     }
                     _ => {}
                 }
@@ -106,6 +111,8 @@ pub struct App {
     current_block: CurrentBlock,
     dir_info: DirInfo,
     share_info: ShareInfo,
+    // 发送share info change
+    tx: Sender<()>,
 }
 
 impl App {
@@ -117,7 +124,8 @@ impl App {
         let s = Self {
             current_block: CurrentBlock::Dir,
             dir_info: DirInfo::new(current_dir)?,
-            share_info: ShareInfo::new(tx, path_arr),
+            share_info: ShareInfo::new(path_arr),
+            tx,
         };
         Ok(s)
     }
@@ -319,18 +327,15 @@ impl PathInfo {
 
 struct ShareInfo {
     path_arr: Arc<RwLock<Vec<PathBuf>>>,
-    // 发送share info change
-    tx: Sender<()>,
     list_state: ListState,
 }
 
 impl ShareInfo {
-    fn new(tx: Sender<()>, path_arr: Arc<RwLock<Vec<PathBuf>>>) -> Self {
+    fn new(path_arr: Arc<RwLock<Vec<PathBuf>>>) -> Self {
         let mut list_state = ListState::default();
         list_state.select(Some(0));
         Self {
             path_arr,
-            tx,
             list_state,
         }
     }
@@ -345,8 +350,6 @@ impl ShareInfo {
         if self.list_state.selected().is_none() {
             self.list_state.select(Some(0));
         }
-
-        let _ = self.tx.blocking_send(());
     }
 
     fn remove(&mut self) {
@@ -362,8 +365,6 @@ impl ShareInfo {
                 }
             }
         }
-
-        let _ = self.tx.blocking_send(());
     }
 
     fn prev(&mut self) {
@@ -397,8 +398,6 @@ impl ShareInfo {
         let mut path_arr = self.path_arr.blocking_write();
         path_arr.clear();
         self.list_state.select(None);
-
-        let _ = self.tx.blocking_send(());
     }
 }
 

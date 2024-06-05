@@ -16,17 +16,19 @@ use crossterm::{
 };
 use ratatui::prelude::*;
 use tokio::sync::{mpsc, oneshot, RwLock};
+use tracing_appender::rolling::{RollingFileAppender, Rotation};
 
 fn main() -> io::Result<()> {
+    let file_appender = RollingFileAppender::new(Rotation::DAILY, "log", "my_app.log");
+
+    // 设置 tracing 订阅者，将日志输出到文件
+    tracing_subscriber::fmt().with_writer(file_appender).init();
+
     let share_path_arr = Arc::new(RwLock::new(vec![]));
     let (tx, rx) = mpsc::channel(16);
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
 
-    web::run(
-        Arc::new(RwLock::new(rx)),
-        share_path_arr.clone(),
-        shutdown_rx,
-    );
+    web::run(rx, share_path_arr.clone(), shutdown_rx);
 
     let result = match current_dir() {
         Ok(dir) => {
