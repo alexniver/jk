@@ -40,10 +40,8 @@ pub fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Resu
                                 CurrentBlock::Dir => app.set_current_block(CurrentBlock::Shares),
                                 CurrentBlock::Shares => app.set_current_block(CurrentBlock::Dir),
                             }
-                        } else {
-                            if app.current_block == CurrentBlock::Dir {
-                                app.dir_info.set_current_to_parent()?;
-                            }
+                        } else if app.current_block == CurrentBlock::Dir {
+                            app.dir_info.set_current_to_parent()?;
                         }
                     }
                     KeyCode::Char('l') => {
@@ -53,10 +51,8 @@ pub fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Resu
                                 CurrentBlock::Dir => app.set_current_block(CurrentBlock::Shares),
                                 CurrentBlock::Shares => app.set_current_block(CurrentBlock::Dir),
                             }
-                        } else {
-                            if app.current_block == CurrentBlock::Dir {
-                                app.dir_info.set_current_to_child()?;
-                            }
+                        } else if app.current_block == CurrentBlock::Dir {
+                            app.dir_info.set_current_to_child()?;
                         }
                     }
                     KeyCode::Char('j') => match app.current_block {
@@ -256,7 +252,7 @@ fn gen_parent_current_child(
 
     let mut current = PathInfo::new(current_dir, PathType::Current)?;
     current.auto_select(selected_map);
-    let child = if current.files.len() > 0 {
+    let child = if !current.files.is_empty() {
         let selected_idx = if let Some(selected_idx) = current.list_state.selected() {
             selected_idx
         } else {
@@ -341,9 +337,14 @@ impl ShareInfo {
 
     fn add(&mut self, path_buf: PathBuf) {
         let mut path_arr = self.path_arr.blocking_write();
+        if path_arr.contains(&path_buf) {
+            return;
+        }
         path_arr.push(path_buf);
         sort_files(&mut path_arr);
-        self.list_state.select(Some(0));
+        if self.list_state.selected().is_none() {
+            self.list_state.select(Some(0));
+        }
 
         let _ = self.tx.blocking_send(());
     }
@@ -381,6 +382,9 @@ impl ShareInfo {
         let path_arr = self.path_arr.blocking_read();
         if let Some(idx) = self.list_state.selected() {
             let len = path_arr.len();
+            if len <= 1 {
+                return;
+            }
             if idx < len - 1 {
                 self.list_state.select(Some(idx + 1));
             } else {
@@ -392,7 +396,7 @@ impl ShareInfo {
     fn clear(&mut self) {
         let mut path_arr = self.path_arr.blocking_write();
         path_arr.clear();
-        self.list_state.select(Some(0));
+        self.list_state.select(None);
 
         let _ = self.tx.blocking_send(());
     }
@@ -401,21 +405,11 @@ impl ShareInfo {
 fn get_files(dir: &Path, files: &mut Vec<PathBuf>) -> io::Result<()> {
     files.clear();
     if dir.is_dir() {
-        match std::fs::read_dir(dir) {
-            Ok(children) => {
-                for entry in children {
-                    match entry {
-                        Ok(entry) => {
-                            let path = entry.path();
-                            files.push(path);
-                        }
-                        // ignore error
-                        Err(_) => {}
-                    }
-                }
+        if let Ok(children) = std::fs::read_dir(dir) {
+            for entry in children.flatten() {
+                let path = entry.path();
+                files.push(path);
             }
-            // ignore error
-            Err(_) => {}
         }
 
         sort_files(files);

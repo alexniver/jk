@@ -101,7 +101,7 @@ async fn websocket(stream: WebSocket, state: AppState) {
     let list_string = get_list_string(state.clone()).await;
     let _ = sender.send(Message::Text(list_string.to_string())).await;
 
-    while let Some(_) = rx.recv().await {
+    while (rx.recv().await).is_some() {
         let list_string = get_list_string(state.clone()).await;
         if sender.send(Message::Text(list_string)).await.is_err() {
             break;
