@@ -36,8 +36,7 @@ jobs:
       - name: Package as a zip
         working-directory: ./linux
         run: |
-          - zip --recurse-paths ../${{ env.binary }}.zip .
-          tar -czvf ../${{ env.binary }}.tar.gz -C ./target/release kk
+          zip --recurse-paths ../${{ env.binary }}.zip .
 
       - name: Upload binaries to artifacts
         uses: actions/upload-artifact@v3
@@ -51,7 +50,7 @@ jobs:
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: ${{ env.binary }}.tar.gz
-          asset_name: ${{ env.binary }}-linux-${{ steps.get_version.outputs.tag }}.tar.gz
+          file: ${{ env.binary }}.zip
+          asset_name: ${{ env.binary }}-linux-${{ steps.get_version.outputs.tag }}.zip
           tag: ${{ github.ref }}
           overwrite: true
