@@ -6,63 +6,52 @@ on:
       - 'v*'
 
 jobs:
-  build:
+  # Build for Linux
+  release-linux:
     runs-on: ubuntu-latest
 
-    strategy:
-      matrix:
-        platform: [ubuntu-latest, windows-latest]
-
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v2
+      - uses: olegtarasov/get-tag@v2.1.2
+        id: get_version
+      - uses: actions/checkout@v4
+        with:
+          lfs: ${{ env.use_git_lfs }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+      - name: install dependencies
+        run: |
+          sudo apt-get update; sudo apt-get install -y gcc-mingw-w64
 
-    - name: Set up Rust
-      uses: actions-rs/toolchain@v1
-      with:
-        toolchain: stable
+      - name: Build
+        run: |
+          cargo build --release --target x86_64-unknown-linux-gnu
 
-    - name: Install dependencies on Windows
-      if: matrix.platform == 'windows-latest'
-      run: |
-        rustup target add x86_64-pc-windows-gnu
-      shell: pwsh
+      - name: Prepare package
+        run: |
+          mkdir linux
+          cp target/x86_64-unknown-linux-gnu/release/${{ env.binary }} linux/
+          cp -r assets linux/ || true # Try to copy, but ignore if it can't copy if source directory does not exist
 
-    - name: Install dependencies on Linux
-      if: matrix.platform == 'ubuntu-latest'
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y gcc-mingw-w64
-        rustup target add x86_64-pc-windows-gnu
+      - name: Package as a zip
+        working-directory: ./linux
+        run: |
+          - zip --recurse-paths ../${{ env.binary }}.zip .
+          tar -czvf ../${{ env.binary }}.tar.gz -C ./target/release kk
 
-    - name: Build
-      run: |
-        if [ ${{ matrix.platform }} == 'ubuntu-latest' ]; then
-          cargo build --release
-        elif [ ${{ matrix.platform }} == 'windows-latest' ]; then
-          cargo build --release --target x86_64-pc-windows-gnu
-        fi
+      - name: Upload binaries to artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          path: ${{ env.binary }}.zip
+          name: linux
+          retention-days: 1
 
-    - name: Archive
-      if: matrix.platform == 'ubuntu-latest'
-      run: |
-        tar -czvf kk-linux.tar.gz -C target/release kk
-      shell: bash
-
-    - name: Archive
-      if: matrix.platform == 'windows-latest'
-      run: |
-        7z a kk-windows.zip target\x86_64-pc-windows-gnu\release\kk.exe
-      shell: cmd
-
-    - name: Upload Release Asset
-      uses: actions/upload-release-asset@v1
-      with:
-        upload_url: ${{ github.event.release.upload_url }}
-        asset_path: |
-          ${{ github.workspace }}/kk-linux.tar.gz
-          ${{ github.workspace }}/kk-windows.zip
-        asset_name: |
-          kk-linux.tar.gz
-          kk-windows.zip
-        asset_content_type: application/zip
+      - name: Upload binaries to release
+        if: ${{ env.add_binaries_to_github_release == 'true' }}
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: ${{ env.binary }}.tar.gz
+          asset_name: ${{ env.binary }}-linux-${{ steps.get_version.outputs.tag }}.tar.gz
+          tag: ${{ github.ref }}
+          overwrite: true
