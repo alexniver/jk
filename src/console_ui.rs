@@ -187,7 +187,7 @@ impl DirInfo {
 
     fn set_current_to_child(&mut self) -> io::Result<()> {
         if let Some(child) = &self.child {
-            if child.path.is_dir() {
+            if child.path.is_dir() && std::fs::read_dir(&child.path).is_ok() {
                 self.set_current_dir(child.path.clone())?;
             }
         }
@@ -256,18 +256,21 @@ fn gen_parent_current_child(
 
     let mut current = PathInfo::new(current_dir, PathType::Current)?;
     current.auto_select(selected_map);
+    let child = if current.files.len() > 0 {
+        let selected_idx = if let Some(selected_idx) = current.list_state.selected() {
+            selected_idx
+        } else {
+            0
+        };
+        let file = &current.files[selected_idx];
 
-    let selected_idx = if let Some(selected_idx) = current.list_state.selected() {
-        selected_idx
-    } else {
-        0
-    };
-    let file = &current.files[selected_idx];
-
-    let child = if file.is_dir() {
-        let mut path_info = PathInfo::new(file.clone(), PathType::Child)?;
-        path_info.auto_select(selected_map);
-        Some(path_info)
+        if file.is_dir() {
+            let mut path_info = PathInfo::new(file.clone(), PathType::Child)?;
+            path_info.auto_select(selected_map);
+            Some(path_info)
+        } else {
+            None
+        }
     } else {
         None
     };
