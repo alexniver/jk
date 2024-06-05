@@ -343,6 +343,7 @@ impl ShareInfo {
         let mut path_arr = self.path_arr.blocking_write();
         path_arr.push(path_buf);
         sort_files(&mut path_arr);
+        self.list_state.select(Some(0));
 
         let _ = self.tx.blocking_send(());
     }
